@@ -1,0 +1,23 @@
+# High-resolution texture tiers (4K/8K, ~130 MB).
+# Kept out of git so clones stay small; the simulator falls back to the 2K maps,
+# which are tracked. Re-add a file here (or fetch it yourself) to get the
+# close-approach detail back — see textures/CREDITS.md for the sources.
+textures/4k_*
+textures/8k_*
+
+# Browsers cannot decode TIFF; these are source material only.
+textures/*.tif
+
+# OS / editor cruft
+.DS_Store
+Thumbs.db
+desktop.ini
+*.swp
+
+# Logs
+*.log
+npm-debug.log*
+
+# Local scratch
+node_modules/
+.cache/

@@ -1,0 +1,12 @@
+{
+  "name": "solar-system-sim",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "node tests/ephemeris.test.mjs && node tests/kepler-state.test.mjs && node tests/events.test.mjs && node tests/photometry.test.mjs && node tests/data.test.mjs",
+    "report": "node tools/report.mjs",
+    "serve": "node tools/serve.mjs 8130",
+    "fetch-data": "node fetch-data.mjs",
+    "fetch-data:quick": "node fetch-data.mjs --quick"
+  }
+}
