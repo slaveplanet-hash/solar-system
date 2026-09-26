@@ -1,11 +1,4 @@
-# High-resolution texture tiers (4K/8K, ~130 MB).
-# Kept out of git so clones stay small; the simulator falls back to the 2K maps,
-# which are tracked. Re-add a file here (or fetch it yourself) to get the
-# close-approach detail back — see textures/CREDITS.md for the sources.
-textures/4k_*
-textures/8k_*
-
-# Browsers cannot decode TIFF; these are source material only.
+# Browsers cannot decode TIFF; these are source maps that nothing loads.
 textures/*.tif
 
 # OS / editor cruft
