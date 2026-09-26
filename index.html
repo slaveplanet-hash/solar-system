@@ -1,0 +1,257 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Sol Simulator</title>
+<meta name="description" content="Scientifically accurate real-time Solar System simulator (three.js).">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+<script type="importmap">
+{
+  "imports": {
+    "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
+    "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/",
+    "lil-gui": "https://cdn.jsdelivr.net/npm/lil-gui@0.19.2/dist/lil-gui.esm.min.js"
+  }
+}
+</script>
+<style>
+  :root {
+    --glass: rgba(14, 20, 32, 0.55);
+    --glass-strong: rgba(14, 20, 32, 0.78);
+    --edge: rgba(140, 190, 255, 0.18);
+    --text: #dbe7f5;
+    --dim: #8595ab;
+    --accent: #7fd4ff;
+    --pass: #5fe39a; --fail: #ff6b6b; --pending: #f4c95d; --skip: #9aa7b8;
+    --mono: 'JetBrains Mono', ui-monospace, Consolas, monospace;
+    --sans: 'Inter', system-ui, sans-serif;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; overflow: hidden; background: #000; color: var(--text); font-family: var(--sans); }
+  #scene { position: fixed; inset: 0; width: 100%; height: 100%; display: block; touch-action: none; }
+  .panel { position: fixed; background: var(--glass); border: 1px solid var(--edge); border-radius: 12px;
+           backdrop-filter: blur(12px) saturate(140%); -webkit-backdrop-filter: blur(12px) saturate(140%);
+           box-shadow: 0 8px 30px rgba(0,0,0,.35); }
+  .mono { font-family: var(--mono); }
+  button { font: 500 12px var(--sans); color: var(--text); background: rgba(255,255,255,.06); border: 1px solid var(--edge);
+           border-radius: 7px; padding: 5px 9px; cursor: pointer; transition: background .15s, border-color .15s; }
+  button:hover { background: rgba(127,212,255,.14); border-color: rgba(127,212,255,.45); }
+  button.active { background: rgba(127,212,255,.25); border-color: var(--accent); color: #fff; }
+  button:disabled { opacity: .4; cursor: not-allowed; }
+
+  /* HUD */
+  #hud { top: 14px; left: 14px; padding: 12px 14px; min-width: 290px; font-family: var(--mono); font-size: 12px; }
+  #hud h1 { font: 600 11px var(--sans); letter-spacing: .22em; text-transform: uppercase; color: var(--accent); margin: 0 0 8px; }
+  #hud-date { font-size: 16px; font-weight: 600; color: #fff; }
+  #hud .row { display: flex; justify-content: space-between; gap: 14px; line-height: 1.7; }
+  #hud { max-width: 340px; }
+  #hud-unc { text-align: right; }
+  #hud .k { color: var(--dim); }
+  #hud .sep { height: 1px; background: var(--edge); margin: 6px 0; }
+
+  /* Body list */
+  #bodies { top: 290px; left: 14px; padding: 8px; width: 170px; max-height: calc(100vh - 380px); overflow: auto; }
+  #bodies h2, #info h2 { font: 600 10px var(--sans); letter-spacing: .2em; text-transform: uppercase; color: var(--dim); margin: 2px 4px 6px; }
+  .body-btn { display: flex; align-items: center; gap: 8px; width: 100%; text-align: left; margin: 2px 0; background: transparent; border-color: transparent; }
+  .body-btn.moon { padding: 2px 9px 2px 24px; font-size: 11px; color: #b9c6d8; }
+  .body-section { font: 600 9.5px var(--sans); letter-spacing: .18em; text-transform: uppercase; color: var(--dim); margin: 10px 4px 3px; }
+  #info-notes { margin-top: 8px; font: 11px/1.45 var(--sans); color: var(--dim); }
+  .label.minor { font-size: 10.5px; }
+  .label.path { font-size: 10px; opacity: .8; pointer-events: none; border-left-style: dashed; }
+  #oort-note { position: fixed; top: 64px; left: 50%; transform: translateX(-50%); font: 11.5px var(--sans); color: #b9c7de; background: rgba(14,20,32,.6);
+               border: 1px solid var(--edge); border-radius: 8px; padding: 5px 12px; display: none; pointer-events: none; }
+  .body-btn .dot { width: 9px; height: 9px; border-radius: 50%; background: var(--c); box-shadow: 0 0 6px var(--c); flex: none; }
+
+  /* Modes */
+  #modes { top: 14px; left: 50%; transform: translateX(-50%); padding: 6px; display: flex; gap: 5px; align-items: center; }
+  #modes .kbd { font-family: var(--mono); color: var(--dim); margin-right: 4px; }
+  #btn-verify { margin-left: 6px; border-color: rgba(95,227,154,.45); }
+
+  /* Time bar */
+  #timebar { bottom: 14px; left: 50%; transform: translateX(-50%); padding: 8px; display: flex; flex-wrap: wrap; gap: 6px; align-items: center; justify-content: center; max-width: calc(100vw - 28px); }
+  #timebar .group { display: flex; gap: 4px; align-items: center; }
+  #timebar .divider { width: 1px; height: 22px; background: var(--edge); }
+  #date-input { font: 12px var(--mono); color: var(--text); background: rgba(0,0,0,.3); border: 1px solid var(--edge); border-radius: 7px; padding: 4px 6px; color-scheme: dark; }
+  #timebar .utc { font: 10px var(--mono); color: var(--dim); }
+
+  /* Info panel */
+  #info { right: 14px; bottom: 80px; width: 300px; padding: 12px 14px; font-size: 12px; display: none; }
+  #info.open { display: block; }
+  #info-name { font: 600 20px var(--sans); margin: 0; color: #fff; display: flex; align-items: center; gap: 10px; }
+  #info-name::before { content: ''; width: 12px; height: 12px; border-radius: 50%; background: var(--c); box-shadow: 0 0 10px var(--c); }
+  #info-type { color: var(--dim); margin: 2px 0 8px; }
+  #info dl { display: grid; grid-template-columns: auto 1fr; gap: 3px 12px; margin: 0; font-family: var(--mono); font-size: 11.5px; }
+  .info-btn { margin-top: 8px; background: var(--glass-strong); color: inherit; border: 1px solid var(--edge); border-radius: 7px; padding: 4px 12px; font: inherit; cursor: pointer; }
+  .info-btn:hover { border-color: #7fd4ff; }
+  #info dt { color: var(--dim); } #info dd { margin: 0; text-align: right; }
+
+  /* Help */
+  #help { left: 14px; bottom: 14px; padding: 8px 12px; font: 11px/1.65 var(--mono); color: var(--dim); max-width: 330px; }
+  #help b { color: var(--text); font-weight: 600; }
+
+  /* Labels */
+  #labels { position: fixed; inset: 0; pointer-events: none; overflow: hidden; }
+  .label { position: absolute; left: 0; top: 0; font: 500 11.5px var(--sans); color: #e8f0fb; white-space: nowrap; pointer-events: auto; cursor: pointer;
+           padding: 1px 6px 1px 5px; border-left: 2px solid var(--c); background: rgba(0,0,0,.25); border-radius: 0 4px 4px 0;
+           text-shadow: 0 1px 2px #000; user-select: none; will-change: transform; }
+  .label:hover { background: rgba(127,212,255,.25); }
+  .label.moon { font-size: 10.5px; opacity: .85; }
+  .label.sb { font-size: 10px; opacity: .8; pointer-events: none; }
+  #hud .warn, #hud .warn .k { color: #f4c95d; }
+  #hud-data.stale { color: #f4c95d; }
+  #hud-data.missing { color: #ff8a8a; }
+
+  /* Toasts */
+  #toasts { position: fixed; top: 64px; left: 50%; transform: translateX(-50%); display: flex; flex-direction: column; gap: 6px; align-items: center; pointer-events: none; z-index: 20; }
+  .toast { background: var(--glass-strong); border: 1px solid var(--edge); border-radius: 9px; padding: 7px 14px; font-size: 12.5px; transition: opacity .45s, transform .45s; backdrop-filter: blur(10px); }
+  .toast.out { opacity: 0; transform: translateY(-6px); }
+
+  /* Verify modal */
+  #verify { position: fixed; inset: 0; display: none; align-items: center; justify-content: center; background: rgba(0,0,0,.45); z-index: 30; }
+  #verify.open { display: flex; }
+  #verify .panel { position: relative; width: min(860px, calc(100vw - 32px)); max-height: calc(100vh - 60px); overflow: auto; padding: 16px 18px; background: var(--glass-strong); }
+  #verify h2 { margin: 0 0 2px; font: 600 16px var(--sans); }
+  #verify-summary { color: var(--dim); font: 12px var(--mono); margin-bottom: 10px; }
+  #verify table { width: 100%; border-collapse: collapse; }
+  #verify td { padding: 7px 6px; border-top: 1px solid var(--edge); vertical-align: top; }
+  #verify td:first-child { width: 84px; }
+  .vn { font-weight: 600; font-size: 13px; } .vd { font: 11.5px/1.5 var(--mono); color: var(--dim); margin-top: 2px; }
+  .st { font: 600 10.5px var(--mono); padding: 2px 7px; border-radius: 5px; letter-spacing: .05em; }
+  .st-pass { color: #07140c; background: var(--pass); } .st-fail { color: #1b0606; background: var(--fail); }
+  .st-pending { color: #1a1405; background: var(--pending); } .st-skip { color: #0c0f14; background: var(--skip); }
+  #verify .actions { display: flex; gap: 8px; justify-content: flex-end; margin-top: 12px; }
+
+  #gui.lil-gui { --background-color: rgba(14,20,32,.72); --title-background-color: rgba(20,30,48,.9); --font-family: var(--sans); --font-family-mono: var(--mono);
+                 --widget-color: rgba(255,255,255,.08); --hover-color: rgba(127,212,255,.18); --focus-color: rgba(127,212,255,.25); --number-color: var(--accent);
+                 border: 1px solid var(--edge); border-radius: 10px; overflow: hidden; backdrop-filter: blur(12px); top: 14px !important; right: 14px !important;
+                 z-index: 10 !important; max-height: calc(100vh - 110px); overflow-y: auto; }
+  #fatal { display: none; position: fixed; inset: 0; margin: auto; width: fit-content; height: fit-content; padding: 20px; background: #300; border-radius: 10px; }
+
+  #drop-hint { display: none; position: fixed; inset: 18px; border: 2px dashed var(--edge); border-radius: 18px; background: rgba(8, 14, 24, 0.55);
+    color: #cfe6ff; font-size: 18px; align-items: center; justify-content: center; z-index: 50; pointer-events: none; backdrop-filter: blur(4px); }
+  body.dropping #drop-hint { display: flex; }
+  #events { right: 290px; top: 60px; width: 380px; max-height: calc(100vh - 170px); display: none; flex-direction: column; padding: 10px 12px; }
+  #events.open { display: flex; }
+  #events .ev-head { display: flex; align-items: center; gap: 8px; }
+  #events .ev-head h2 { flex: 1; margin: 0; }
+  #events select, #events #ev-close { background: var(--glass-strong); color: inherit; border: 1px solid var(--edge); border-radius: 6px; font: inherit; font-size: 11.5px; padding: 2px 6px; }
+  #events #ev-close { cursor: pointer; }
+  #ev-sub { color: var(--dim); font-size: 11px; margin: 6px 0; }
+  #ev-list { overflow-y: auto; display: flex; flex-direction: column; gap: 3px; }
+  .ev-row { display: flex; gap: 8px; align-items: flex-start; text-align: left; background: transparent; color: inherit; border: 1px solid transparent; border-radius: 7px; padding: 5px 6px; cursor: pointer; font: inherit; }
+  .ev-row:hover { border-color: var(--edge); background: var(--glass-strong); }
+  .ev-row.past { opacity: 0.5; }
+  .ev-ic { width: 16px; color: #7fd4ff; }
+  .ev-main { flex: 1; display: flex; flex-direction: column; }
+  .ev-t { font-size: 12.5px; }
+  .ev-d { color: var(--dim); font-size: 11px; }
+  .ev-date { font-family: var(--mono); font-size: 10.5px; color: var(--dim); white-space: nowrap; }
+  body.hide-ui #sensor { display: none !important; }
+  @media (max-width: 900px) { #events { left: 14px; right: 14px; width: auto; } }
+  #credits { position: fixed; right: 10px; bottom: 4px; font-size: 10px; color: var(--dim); opacity: 0.75; z-index: 4; }
+  #credits a { color: inherit; }
+  body.hide-ui .panel, body.hide-ui #gui, body.hide-ui #labels, body.hide-ui #toasts { display: none !important; }
+
+  @media (max-width: 900px) {
+    #bodies, #help { display: none; }
+    #hud { min-width: 0; width: calc(100vw - 28px); font-size: 11px; }
+    #modes { top: auto; bottom: 120px; }
+    #info { left: 14px; right: 14px; width: auto; bottom: 170px; }
+  }
+</style>
+</head>
+<body>
+<canvas id="scene"></canvas>
+<div id="labels"></div>
+
+<div id="hud" class="panel">
+  <h1>Sol · Solar System Simulator</h1>
+  <div id="hud-date">—</div>
+  <div class="row"><span class="k" id="hud-jd">—</span></div>
+  <div class="row"><span class="k">Time rate</span><span id="hud-rate">—</span></div>
+  <div class="row"><span class="k">Scale</span><span id="hud-scale">—</span></div>
+  <div class="sep"></div>
+  <div class="row"><span class="k">Camera</span><span id="hud-mode">—</span></div>
+  <div class="row"><span class="k">Target</span><span id="hud-target">—</span></div>
+  <div class="row"><span class="k">Distance</span><span id="hud-dist">—</span></div>
+  <div class="row"><span class="k">Altitude</span><span id="hud-alt">—</span></div>
+  <div class="row"><span class="k">Speed <span id="hud-speed-ref"></span></span><span id="hud-speed">—</span></div>
+  <div class="row"><span class="k">Light from Sun</span><span id="hud-light">—</span></div>
+  <div class="sep"></div>
+  <div class="row"><span class="k">Data</span><span id="hud-data">loading…</span></div>
+  <div class="row"><span class="k">Small bodies</span><span id="hud-sb">—</span></div>
+  <div class="row" id="hud-shower-row" style="display:none"><span class="k">Meteor shower</span><span id="hud-shower"></span></div>
+  <div class="row warn" id="hud-unc-row" style="display:none"><span class="k">⚠ Orbits</span><span id="hud-unc"></span></div>
+</div>
+
+<div id="bodies" class="panel"><h2>Bodies</h2><div id="body-list"></div></div>
+
+<div id="modes" class="panel">
+  <button data-mode="1" title="Free flight (1)"><span class="kbd">1</span>Free</button>
+  <button data-mode="2" title="Orbit / focus (2)"><span class="kbd">2</span>Orbit</button>
+  <button data-mode="3" title="Ship chase camera (3)"><span class="kbd">3</span>Chase</button>
+  <button data-mode="4" title="Ship cockpit (4)"><span class="kbd">4</span>Cockpit</button>
+  <button id="btn-surface" title="Stand on the selected body and look at the sky (G)"><span class="kbd">G</span>Surface</button>
+  <button id="btn-verify" title="Run accuracy self-checks">✓ Verify</button>
+</div>
+
+<div id="timebar" class="panel">
+  <div class="group">
+    <button id="btn-reverse" title="Reverse time (R)">⇆</button>
+    <button id="btn-pause" title="Pause / play (P)">❚❚</button>
+  </div>
+  <div class="divider"></div>
+  <div class="group" id="rate-presets"></div>
+  <div class="divider"></div>
+  <div class="group">
+    <input id="date-input" type="datetime-local" step="60" aria-label="Jump to date (UTC)">
+    <span class="utc">UTC</span>
+    <button id="btn-go">Go</button>
+    <button id="btn-now">Now</button>
+  </div>
+</div>
+
+<div id="info" class="panel">
+  <h2>Selected body</h2>
+  <div id="info-name">—</div>
+  <div id="info-type">—</div>
+  <dl>
+    <dt>Radius</dt><dd id="info-radius">—</dd>
+    <dt>Mass</dt><dd id="info-mass">—</dd>
+    <dt>Orbital period</dt><dd id="info-orbit">—</dd>
+    <dt>Rotation period</dt><dd id="info-rot">—</dd>
+    <dt>Axial tilt</dt><dd id="info-tilt">—</dd>
+    <dt>Distance from Sun</dt><dd id="info-sundist">—</dd>
+    <dt>Moons shown</dt><dd id="info-moons">—</dd>
+  </dl>
+  <div id="info-notes-row" style="display:none"><div id="info-notes"></div></div>
+  <button id="info-follow" class="info-btn" style="display:none" title="Fly to this spacecraft and follow it (orbit camera rides along)">Follow</button>
+</div>
+
+<div id="help" class="panel">
+  <div id="help-orbit"><b>Drag</b> orbit · <b>Wheel</b> zoom · <b>Click</b> a body to fly there<br><b>1</b> free flight · <b>V</b> true/visual scale · <b>H</b> hide UI<br><b>P</b> pause · <b>R</b> reverse · <b>[ ]</b> slower/faster</div>
+  <div id="help-free" style="display:none"><b>Click</b> to capture mouse · <b>WASD</b> move · <b>Space</b> up · <b>C/Ctrl</b> down<br><b>Q/E</b> roll · <b>Shift</b> boost · <b>Wheel</b> max speed · <b>Esc</b> release<br><b>2</b> orbit mode · <b>H</b> hide UI</div>
+  <div id="help-ship" style="display:none"><b>Click</b> to steer with the mouse · <b>W/S</b> thrust · <b>A/D</b> strafe · <b>Space/C</b> up/down<br><b>Q/E</b> roll · <b>Arrows</b> pitch/yaw · <b>Shift</b> boost · <b>Wheel</b> max speed<br><b>3</b> chase · <b>4</b> cockpit · <b>2</b> orbit · drop a <b>.glb</b> to change ship</div>
+  <div id="help-surface" style="display:none"><b>Drag</b>/<b>Arrows</b> look around · <b>WASD</b> walk · <b>Shift</b> run<br><b>Wheel</b> zoom (binoculars) · <b>P</b> pause · <b>[ ]</b> time rate<br><b>G</b> or <b>2</b> leave the surface · <b>H</b> hide UI</div>
+</div>
+<div id="drop-hint">Drop a <b>.glb</b> (or a <b>.gltf</b> with its .bin and textures) to fly it as your ship</div>
+
+<div id="toasts"></div>
+<div id="credits" style="display:none">Planet textures: <a href="https://www.solarsystemscope.com/textures/" target="_blank" rel="noopener">Solar System Scope</a> (<a href="https://creativecommons.org/licenses/by/4.0/" target="_blank" rel="noopener">CC BY 4.0</a>), NASA data</div>
+<div id="oort-note" class="panel">Oort cloud (faint dots): an <b>illustrative statistical model</b> — no Oort-cloud object has ever been observed there.</div>
+
+<div id="verify">
+  <div class="panel">
+    <h2>Accuracy self-checks</h2>
+    <div id="verify-summary"></div>
+    <table><tbody id="verify-rows"></tbody></table>
+    <div class="actions"><button id="verify-copy" title="Copy the full pass/fail report as Markdown (for sharing or keeping)">Copy report</button><button id="verify-rerun">Run again</button><button id="verify-close">Close</button></div>
+  </div>
+</div>
+
+<div id="fatal"></div>
+<script type="module" src="./js/main.js"></script>
+</body>
+</html>

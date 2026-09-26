@@ -1,0 +1,16 @@
+{
+  "_comment": "Photo maps used by the simulator (Solar System Scope, CC BY 4.0 — see CREDITS.md). Only the 2K tier is listed: it loads when a planet is first seen up close and stays resident. The 4K/8K tier (loaded on close approach with the Medium/High preset, released when you leave) is NOT tracked in git — see .gitignore. Add a file name here after dropping it into textures/ to enable that tier. Deliberately NOT listed: the *_fictional dwarf-planet maps (invented surfaces), the .tif normal/specular maps (browsers can't load TIFF), 2k/8k_stars*.jpg (the sky is drawn from the Yale Bright Star Catalogue + a procedural Milky Way) and the Saturn ring alpha maps (rings are built from measured ring data).",
+  "available": [
+    "2k_mercury.jpg",
+    "2k_venus_atmosphere.jpg",
+    "2k_earth_daymap.jpg",
+    "2k_earth_nightmap.jpg",
+    "2k_earth_clouds.jpg",
+    "2k_moon.jpg",
+    "2k_mars.jpg",
+    "2k_jupiter.jpg",
+    "2k_saturn.jpg",
+    "2k_uranus.jpg",
+    "2k_neptune.jpg"
+  ]
+}
