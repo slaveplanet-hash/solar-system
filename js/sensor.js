@@ -132,7 +132,7 @@ void main() {
     let n = 0;
     for (const b of bodies) {
       if (n >= this.max) break;
-      if (b.kind === 'sun' || b.offline || !b.group.visible || b.minorType === 'spacecraft') continue;
+      if (b.kind === 'sun' || b.offline || !b.group.visible || b.minorType === 'spacecraft' || b.minorType === 'satellite') continue;
       const m = apparentMagnitude(b, obsHelio);
       if (!m) continue;
       this.mags.set(b.key, m.V);
@@ -207,7 +207,7 @@ export class SensorOverlay {
       }
       cands.sort((a, c) => a.s.d - c.s.d);
       for (const { b, s } of cands.slice(0, 40)) {
-        const color = b.minorType === 'spacecraft' ? '#b8ffb8' : b.minorType === 'comet' || b.minorType === 'interstellar' ? '#9fe8ff' : '#ffd79a';
+        const color = b.minorType === 'spacecraft' || b.minorType === 'satellite' ? '#b8ffb8' : b.minorType === 'comet' || b.minorType === 'interstellar' ? '#9fe8ff' : '#ffd79a';
         draw(s.x, s.y, color, b.shortName || b.name, fmtDist(b.camDist, b), b === selected);
       }
     }

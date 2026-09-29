@@ -60,7 +60,7 @@ function hexPanel(r, y, cell, tilt = 0) {
   return part(g, cell);
 }
 
-function buildModel(style) {
+export function buildModel(style) {
   const P = [];
   switch (style) {
     case 'voyager':           // 3.7 m dish on a decagonal bus, RTG boom, magnetometer boom (13 m)
@@ -102,6 +102,10 @@ function buildModel(style) {
       P.push(box(1.0, 0.03, 0.03, 0, 0, 0, SILVER), box(0.05, 0.05, 0.5, 0, -0.03, 0, WHITE), cyl(0.04, 0.04, 0.3, 0, -0.03, 0.4, WHITE, [Math.PI / 2, 0, 0]));
       for (const x of [-0.85, -0.6, 0.6, 0.85]) P.push(box(0.12, 0.005, 0.68, x, 0, 0, CELL));
       for (const x of [-0.25, 0.25]) P.push(box(0.1, 0.005, 0.25, x, -0.05, 0.1, WHITE));
+      break;
+    case 'satellite':         // generic satellite: foil-wrapped bus, two solar wings, antenna toward Earth (−Y)
+      P.push(box(0.3, 0.3, 0.3, 0, 0, 0, GOLD), box(0.6, 0.01, 0.25, 0.48, 0, 0, CELL), box(0.6, 0.01, 0.25, -0.48, 0, 0, CELL),
+        cyl(0.01, 0.01, 0.2, 0, 0, 0, SILVER, [0, 0, Math.PI / 2]), dish(0.1, 0.03, -0.2, WHITE));
       break;
     default:
       P.push(box(0.4, 0.4, 0.4, 0, 0, 0, GOLD));
@@ -158,7 +162,7 @@ function escapingTail(track) {
 }
 
 /** body→ecliptic 3×3 (row-major, columns = body axes); body z (mesh +Y) along `p`, x ⟂ p in the ecliptic plane. */
-function frameAlong(p) {
+export function frameAlong(p) {
   const n = Math.hypot(...p) || 1, z = p.map((v) => v / n);
   let x = [-z[1], z[0], 0];
   if (Math.hypot(...x) < 1e-6) x = [1, 0, 0];
@@ -170,11 +174,12 @@ function frameAlong(p) {
 // ---------------------------------------------------------------------------------------------
 // Body definitions
 // ---------------------------------------------------------------------------------------------
-export function buildSpacecraftDefs(data, system) {
+/** skip: track ids provided by another source (the ISS comes from the satellite data when present). */
+export function buildSpacecraftDefs(data, system, skip = new Set()) {
   const defs = [], trackIds = new Set();
   if (!data?.available) return { defs, trackIds };
   for (const track of Object.values(data.tracks)) {
-    if (track.kind !== 'spacecraft') continue;
+    if (track.kind !== 'spacecraft' || skip.has(track.id)) continue;
     const info = CRAFT[track.id] || { name: track.name, launch: null, style: 'generic', span: 5, point: 'earth', color: '#b8ffb8', mission: '' };
     trackIds.add(track.id);
     track.lastHelio = escapingTail(track);
@@ -249,7 +254,7 @@ export class SpacecraftTrails {
     this.hidden = false;
     this.trails = [];
     for (const b of system.bodies) {
-      if (b.minorType !== 'spacecraft') continue;
+      if (b.minorType !== 'spacecraft' || !b.track) continue;     // e.g. the ISS from satellite elements: its orbit path is drawn by satellites.js
       const t0 = b.track.start;
       // One static buffer per frame of reference: heliocentric rows, and each planet-centred segment.
       const parts = [];
@@ -292,7 +297,9 @@ export class SpacecraftTrails {
     p.anchor = host ? [0, 0, 0] : scale.helioToScene([p.rows[p.rows.length - 1][1], p.rows[p.rows.length - 1][2], p.rows[p.rows.length - 1][3]], [0, 0, 0]);
     for (let i = 0; i < p.rows.length; i++) {
       const r = p.rows[i];
-      if (host) scale.moonOffsetToScene([r[1], r[2], r[3]], host.radius, 0.01, tmp);
+      // Same placement as the craft itself (mapHelioToScene): exact in true scale, where the moon mapping
+      // would clamp to 1.15 planet radii (the ISS trail was drawn ~550 km too high).
+      if (host) { if (scale.s <= 0) { tmp[0] = r[1]; tmp[1] = r[3]; tmp[2] = -r[2]; } else scale.moonOffsetToScene([r[1], r[2], r[3]], host.radius, 0.01, tmp); }
       else { scale.helioToScene([r[1], r[2], r[3]], tmp); tmp[0] -= p.anchor[0]; tmp[1] -= p.anchor[1]; tmp[2] -= p.anchor[2]; }
       pos[i * 3] = tmp[0]; pos[i * 3 + 1] = tmp[1]; pos[i * 3 + 2] = tmp[2];
     }

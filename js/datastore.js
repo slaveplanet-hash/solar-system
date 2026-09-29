@@ -42,8 +42,14 @@ export class DataStore {
         catch (e) { this.errors.push(e.message); }
       }));
     } catch (e) { this.errors.push(e.message); }
+    // Earth satellites (optional: data folders from before satellites were added don't have it).
+    try { this.satellites = await this.read(this.base + 'satellites.json'); }
+    catch { this.satellites = null; }
     return this;
   }
+
+  /** Age (days) of the satellite snapshot, or Infinity. */
+  get satAgeDays() { return this.satellites ? (Date.now() - Date.parse(this.satellites.generated)) / 864e5 : Infinity; }
 
   get ageDays() { return this.manifest ? (Date.now() - Date.parse(this.manifest.generated)) / 864e5 : Infinity; }
   get stale() { return this.ageDays > STALE_DAYS; }

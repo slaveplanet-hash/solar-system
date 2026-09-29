@@ -21,7 +21,7 @@ const dataDir = argi > 0 ? path.resolve(process.argv[argi + 1]) : path.join(root
 const data = await new DataStore(dataDir + path.sep, async (p) => JSON.parse(await readFile(p, 'utf8'))).load();
 const results = runVerify({ data });
 
-const suites = ['ephemeris.test.mjs', 'kepler-state.test.mjs', 'events.test.mjs', 'photometry.test.mjs', 'data.test.mjs'];
+const suites = ['ephemeris.test.mjs', 'kepler-state.test.mjs', 'events.test.mjs', 'photometry.test.mjs', 'data.test.mjs', 'satellites.test.mjs', 'mcp.test.mjs'];
 const tests = suites.map((s) => {
   const r = spawnSync(process.execPath, [path.join(root, 'tests', s)], { cwd: root, encoding: 'utf8', env: { ...process.env, SOL_DATA: dataDir } });
   const lines = (r.stdout || '').split('\n').map((l) => l.trimEnd()).filter((l) => /^(PASS|FAIL|SKIP)\b/.test(l))

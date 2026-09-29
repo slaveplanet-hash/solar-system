@@ -7,6 +7,7 @@
 <meta name="description" content="Scientifically accurate real-time Solar System simulator (three.js).">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+<script src="./js/errorlog.js"></script>
 <script type="importmap">
 {
   "imports": {
@@ -182,6 +183,7 @@
   <div class="sep"></div>
   <div class="row"><span class="k">Data</span><span id="hud-data">loading…</span></div>
   <div class="row"><span class="k">Small bodies</span><span id="hud-sb">—</span></div>
+  <div class="row" id="hud-sat-row" style="display:none"><span class="k">Satellites</span><span id="hud-sat">—</span></div>
   <div class="row" id="hud-shower-row" style="display:none"><span class="k">Meteor shower</span><span id="hud-shower"></span></div>
   <div class="row warn" id="hud-unc-row" style="display:none"><span class="k">⚠ Orbits</span><span id="hud-unc"></span></div>
 </div>
