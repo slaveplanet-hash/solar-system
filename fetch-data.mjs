@@ -5,6 +5,10 @@
 //   node fetch-data.mjs            (full dataset: ~2–5 min, ~25 MB — measured 111 s / 24.8 MB on 2026-09-25)
 //   node fetch-data.mjs --quick    (test dataset: ~1 min, ~4 MB)
 //   node fetch-data.mjs --full     (same as no flag)
+//   node fetch-data.mjs --satellites  (only refresh the Earth satellites — do this every few days;
+//                                      skipped if the file is < 2 h old, add --force to override)
+//   node fetch-data.mjs --auto     (what update.bat runs: the full fetch if the main data is missing or
+//                                   older than AUTO_FULL_DAYS, otherwise only the satellites)
 //
 // Node.js 18+ (built-in fetch), no dependencies. Writes ./data/:
 //   asteroids.json        brightest numbered asteroids (+ named bodies with physical data)
@@ -15,16 +19,18 @@
 //   interstellar.json     every "nI" object in the JPL SBDB (1I, 2I, 3I, … discovered automatically)
 //   dwarfs.json           dwarf planets and large TNOs (with physical parameters)
 //   close_approaches.json Earth close approaches (JPL CAD API)
+//   satellites.json       Earth satellites: CelesTrak GP mean elements (OMM) for the groups in js/satcore.js
 //   horizons_vectors/     JPL Horizons state vectors (index.json + one file per object)
 //   manifest.json         download date, mode, object counts, sources
 //
-// Sources: JPL SBDB Query API, SBDB API, SBDB Close-Approach Data API, JPL Horizons API.
+// Sources: JPL SBDB Query API, SBDB API, SBDB Close-Approach Data API, JPL Horizons API, CelesTrak GP API.
 // Requests are sequential with a short delay; failures retry with exponential backoff.
 // Re-run any time to pick up newly discovered objects.
 // =============================================================================
-import { mkdir, writeFile, rename } from 'node:fs/promises';
+import { mkdir, writeFile, rename, readFile } from 'node:fs/promises';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { SAT_GROUPS, SAT_COLUMNS, buildSatTable } from './js/satcore.js';
 
 const ROOT = dirname(fileURLToPath(import.meta.url));
 // --out <dir> writes somewhere else (e.g. when Windows "Controlled folder access" blocks node in Documents).
@@ -32,6 +38,10 @@ const outIdx = process.argv.indexOf('--out');
 const DATA = outIdx > 0 && process.argv[outIdx + 1] ? resolve(process.argv[outIdx + 1]) : join(ROOT, 'data');
 const VEC = join(DATA, 'horizons_vectors');
 const QUICK = process.argv.includes('--quick');
+const SAT_ONLY = process.argv.includes('--satellites');
+const FORCE = process.argv.includes('--force');
+const AUTO = process.argv.includes('--auto');
+const AUTO_FULL_DAYS = 30;
 const MODE = QUICK ? 'quick' : 'full';
 const DELAY_MS = 350;
 const UA = 'SolSimulator-fetch-data/1.0 (educational; node)';
@@ -40,6 +50,7 @@ const SBDB_QUERY = 'https://ssd-api.jpl.nasa.gov/sbdb_query.api';
 const SBDB = 'https://ssd-api.jpl.nasa.gov/sbdb.api';
 const CAD = 'https://ssd-api.jpl.nasa.gov/cad.api';
 const HORIZONS = 'https://ssd.jpl.nasa.gov/api/horizons.api';
+const CELESTRAK = 'https://celestrak.org/NORAD/elements/gp.php';
 
 const LIMITS = QUICK
   ? { asteroids: 2000, neos: 1000, cadDist: 0.02, cadFrom: '2000-01-01', cadTo: '2050-12-31', spacecraft: ['voyager1', 'newhorizons', 'jwst'] }
@@ -245,7 +256,7 @@ async function main() {
   const jdNow = now.getTime() / 864e5 + 2440587.5;
 
   // 1. Asteroids: brightest numbered (sorted by H).
-  log(`1/7 Asteroids — ${LIMITS.asteroids.toLocaleString()} brightest numbered (SBDB Query API)…`);
+  log(`1/8 Asteroids — ${LIMITS.asteroids.toLocaleString()} brightest numbered (SBDB Query API)…`);
   const ast = await sbdbQuery({ fields: AST_FIELDS, 'sb-kind': 'a', 'sb-ns': 'n', sort: 'H' }, LIMITS.asteroids, 'asteroids');
   const astRows = ast.rows.map((r) => asteroidRow(ast.fields, r)).filter((r) => r[2] > 0 && r[3] < 1);
   log('   named bodies with physical data (SBDB API)…');
@@ -255,7 +266,7 @@ async function main() {
   counts.asteroids = astRows.length;
 
   // 2. NEOs (full list; PHA flag; orbit class Atira/Aten/Apollo/Amor).
-  log('2/7 Near-Earth objects (SBDB Query API, sb-group=neo)…');
+  log('2/8 Near-Earth objects (SBDB Query API, sb-group=neo)…');
   const neo = await sbdbQuery({ fields: AST_FIELDS, 'sb-kind': 'a', 'sb-group': 'neo', sort: 'H' }, LIMITS.neos, 'NEOs');
   const neoRows = neo.rows.map((r) => asteroidRow(neo.fields, r)).filter((r) => r[2] > 0 && r[3] < 1);
   sizes.neos = await writeJSON(join(DATA, 'neos.json'), { columns: AST_COLUMNS, rows: neoRows, total: neo.total, source: 'JPL SBDB' });
@@ -263,14 +274,14 @@ async function main() {
   counts.phas = neoRows.filter((r) => r[12] & 2).length;
 
   // 2b. Kuiper belt & Centaurs: every TNO and Centaur (numbered and unnumbered).
-  log('2b/7 Trans-Neptunian objects and Centaurs (SBDB Query API, sb-class=TNO,CEN)…');
+  log('2b/8 Trans-Neptunian objects and Centaurs (SBDB Query API, sb-class=TNO,CEN)…');
   const kb = await sbdbQuery({ fields: AST_FIELDS, 'sb-kind': 'a', 'sb-class': 'TNO,CEN', sort: 'H' }, QUICK ? 1000 : Infinity, 'TNOs + Centaurs');
   const kbRows = kb.rows.map((r) => asteroidRow(kb.fields, r)).filter((r) => r[2] > 0 && r[3] < 1);
   sizes.kuiper = await writeJSON(join(DATA, 'kuiper.json'), { columns: AST_COLUMNS, rows: kbRows, total: kb.total, source: 'JPL SBDB' });
   counts.kuiper = kbRows.length;
 
   // 3. Comets: numbered periodic + perihelion within the next 5 years + notable ones.
-  log('3/7 Comets…');
+  log('3/8 Comets…');
   const cNum = await sbdbQuery({ fields: COM_FIELDS, 'sb-kind': 'c', 'sb-ns': 'n' }, 5000, 'numbered periodic comets');
   const upcoming = await sbdbQuery({ fields: COM_FIELDS, 'sb-kind': 'c', 'sb-cdata': JSON.stringify({ AND: [`tp|RG|${jdNow.toFixed(1)}|${(jdNow + 5 * 365.25).toFixed(1)}`] }) }, 5000, 'comets reaching perihelion within 5 years');
   const byDes = new Map();
@@ -289,7 +300,7 @@ async function main() {
   counts.comets = cometRows.length;
 
   // 4. Interstellar objects: 1I, 2I, 3I, … until two consecutive designations are missing.
-  log('4/7 Interstellar objects (SBDB API, "nI" designations)…');
+  log('4/8 Interstellar objects (SBDB API, "nI" designations)…');
   const inter = [];
   for (let n = 1, misses = 0; misses < 2 && n < 100; n++) {
     const o = await sbdbObject(`${n}I`);
@@ -302,14 +313,14 @@ async function main() {
   counts.interstellar = inter.length;
 
   // 5. Dwarf planets / large TNOs.
-  log('5/7 Dwarf planets…');
+  log('5/8 Dwarf planets…');
   const dwarfs = [];
   for (const n of DWARFS) { const o = await sbdbObject(n); if (o) { dwarfs.push(o); log(`     ${o.name}`); } }
   sizes.dwarfs = await writeJSON(join(DATA, 'dwarfs.json'), { objects: dwarfs, source: 'JPL SBDB' });
   counts.dwarfs = dwarfs.length;
 
   // 6. Close approaches to Earth.
-  log(`6/7 Earth close approaches ${LIMITS.cadFrom} … ${LIMITS.cadTo}, < ${LIMITS.cadDist} AU (CAD API)…`);
+  log(`6/8 Earth close approaches ${LIMITS.cadFrom} … ${LIMITS.cadTo}, < ${LIMITS.cadDist} AU (CAD API)…`);
   const cad = await get(`${CAD}?${qs({ 'date-min': LIMITS.cadFrom, 'date-max': LIMITS.cadTo, 'dist-max': LIMITS.cadDist, fullname: 'true', sort: 'date' })}`);
   const cf = cad.fields || [];
   const cadRows = (cad.data || []).map((r) => {
@@ -321,7 +332,7 @@ async function main() {
   log(`   ${cadRows.length.toLocaleString()} close approaches`);
 
   // 7. Horizons state vectors.
-  log('7/7 JPL Horizons state vectors…');
+  log('7/8 JPL Horizons state vectors…');
   const index = [];
   const wanted = Object.entries(TRACKS).filter(([id, t]) => t.kind !== 'spacecraft' || !LIMITS.spacecraft || LIMITS.spacecraft.includes(id));
   let vecBytes = 0;
@@ -343,21 +354,102 @@ async function main() {
   sizes.horizons_vectors = vecBytes;
   counts.horizons_tracks = index.length;
 
+  // 8. Earth satellites.
+  // A CelesTrak outage or block must not lose the JPL data downloaded above (the manifest is written last).
+  let sat = null;
+  try { sat = await fetchSatellites(); }
+  catch (e) { log(`   ! satellites skipped: ${e.message} — try again later with: node fetch-data.mjs --satellites`); }
+  if (sat) { counts.satellites = sat.count; sizes.satellites = sat.bytes; }
+
   const manifest = {
     generated: now.toISOString(), date: now.toISOString().slice(0, 10), mode: MODE, counts,
     bytes: sizes, requests,
     sources: {
-      sbdb_query: SBDB_QUERY, sbdb: SBDB, cad: CAD, horizons: HORIZONS,
+      sbdb_query: SBDB_QUERY, sbdb: SBDB, cad: CAD, horizons: HORIZONS, celestrak: CELESTRAK,
       note: 'Osculating elements at each object\'s epoch (two-body propagation in the browser). Horizons vectors: geometric, ecliptic J2000, TDB.',
     },
   };
+  if (sat) manifest.satellites = { generated: sat.generated, count: sat.count };
   await writeJSON(join(DATA, 'manifest.json'), manifest);
   const total = Object.values(sizes).reduce((s, v) => s + v, 0);
   log(`Done: ${requests} requests, ${(total / 1e6).toFixed(1)} MB written to ${DATA}`);
   for (const [k, v] of Object.entries(counts)) log(`   ${k.padEnd(18)} ${v.toLocaleString()}`);
 }
 
-main().catch((e) => {
+// ---------------------------------------------------------------------------------------------
+// 8. Earth satellites — CelesTrak GP data (OMM JSON; the TLE format can't hold catalog numbers
+//    above 99999, which new objects have had since July 2026). CelesTrak refreshes about every
+//    2 hours and blocks clients that download more often, so a newer file than that is kept.
+//    SAT_SOURCE_DIR=<dir> reads <dir>/<group>.json instead of downloading (offline testing).
+// ---------------------------------------------------------------------------------------------
+async function fetchSatellites() {
+  const file = join(DATA, 'satellites.json');
+  log('8/8 Earth satellites (CelesTrak GP data, OMM)…');
+  try {
+    const prev = JSON.parse(await readFile(file, 'utf8'));
+    const ageH = (Date.now() - Date.parse(prev.generated)) / 36e5;
+    if (ageH < 2 && !FORCE && !process.env.SAT_SOURCE_DIR) {
+      log(`   satellites.json is only ${(ageH * 60).toFixed(0)} min old — kept (CelesTrak updates every ~2 h; --force to download anyway)`);
+      return { generated: prev.generated, count: prev.rows.length, bytes: 0 };
+    }
+  } catch { /* no previous file */ }
+  const byGroup = {};
+  for (const g of SAT_GROUPS) {
+    let list;
+    if (process.env.SAT_SOURCE_DIR) list = JSON.parse(await readFile(join(process.env.SAT_SOURCE_DIR, `${g.celestrak}.json`), 'utf8'));
+    else {
+      // An empty reply (HTTP 200, no body) was seen once in testing: get() retries a body that isn't
+      // JSON; an empty list is retried here.
+      for (let attempt = 0; attempt < 3; attempt++) {
+        list = await get(`${CELESTRAK}?${qs({ GROUP: g.celestrak, FORMAT: 'json' })}`);
+        if (Array.isArray(list) && list.length) break;
+        await sleep(3000);
+      }
+    }
+    if (!Array.isArray(list) || !list.length) throw new Error(`CelesTrak returned no data for group "${g.celestrak}"`);
+    byGroup[g.key] = list;
+    log(`   ${g.name.padEnd(22)} ${list.length}`);
+  }
+  const rows = buildSatTable(byGroup);
+  const generated = new Date().toISOString();
+  const epochs = rows.map((r) => Date.parse(r[3] + 'Z')).sort((a, b) => a - b);
+  const range = [new Date(epochs[0]).toISOString(), new Date(epochs[epochs.length - 1]).toISOString()];
+  const bytes = await writeJSON(file, { generated, source: 'CelesTrak GP data (https://celestrak.org), U.S. Space Force catalog',
+    format: 'OMM mean elements for SGP4/SDP4', groups: SAT_GROUPS.map(({ key, name, celestrak, color }) => ({ key, name, celestrak, color })),
+    columns: SAT_COLUMNS, rows, epochRange: range });
+  log(`   ${rows.length} satellites (unique), element epochs ${range[0].slice(0, 10)} … ${range[1].slice(0, 10)}`);
+  return { generated, count: rows.length, bytes };
+}
+
+/** --satellites: refresh only satellites.json and patch the manifest. */
+async function satellitesOnly() {
+  log('Sol simulator data fetch — satellites only');
+  await mkdir(DATA, { recursive: true });
+  const sat = await fetchSatellites();
+  try {
+    const m = JSON.parse(await readFile(join(DATA, 'manifest.json'), 'utf8'));
+    m.counts.satellites = sat.count;
+    if (sat.bytes) m.bytes.satellites = sat.bytes;
+    m.satellites = { generated: sat.generated, count: sat.count };
+    m.sources.celestrak = CELESTRAK;
+    await writeJSON(join(DATA, 'manifest.json'), m);
+  } catch { log('   (no manifest.json yet — run the full fetch once so the simulator finds the data folder)'); }
+  log(`Done: ${requests} requests.`);
+}
+
+/** --auto: full refresh when the main data is missing or old, otherwise just the satellites. */
+async function auto() {
+  let age = Infinity;
+  try { age = (Date.now() - Date.parse(JSON.parse(await readFile(join(DATA, 'manifest.json'), 'utf8')).generated)) / 864e5; } catch { /* no data yet */ }
+  if (age > AUTO_FULL_DAYS) {
+    log(age === Infinity ? 'No data yet — full download.' : `Main data is ${age.toFixed(0)} days old (> ${AUTO_FULL_DAYS}) — full download.`);
+    return main();
+  }
+  log(`Main data is ${age.toFixed(0)} days old (full refresh after ${AUTO_FULL_DAYS} days) — updating the satellites only.`);
+  return satellitesOnly();
+}
+
+(AUTO ? auto() : SAT_ONLY ? satellitesOnly() : main()).catch((e) => {
   console.error(`\nfetch-data failed: ${e.message}`);
   if (['ENOENT', 'EBADF', 'EPERM', 'EACCES'].includes(e.code) && process.platform === 'win32') {
     console.error(`

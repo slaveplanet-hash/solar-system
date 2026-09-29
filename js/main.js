@@ -11,6 +11,8 @@
 // =============================================================================
 import * as THREE from 'three';
 import { SimClock, utcToTDB, utcStringToJD } from './time.js';
+import { satRecords } from './satcore.js';
+import { SatelliteLayer } from './satellites.js';
 import { computeSystemState, AU_KM } from './ephemeris.js';
 import { computeMoonStates } from './moons.js';
 import { ScaleSystem } from './scale.js';
@@ -83,6 +85,7 @@ class App {
     this.clock.onClamp = (m) => this.ui.toast(m, 5000);
     this.cam.onModeChange = (m) => { this.ui.syncMode(m); this._surfaceOverlays(m === 'surface'); };
     this.cam.onPick = (b) => this.focus(b);
+    this.cam.onPickSatellite = (x, y, body) => this.pickSatellite(x, y, body);
     this.cam.onNotice = (m) => this.ui.toast(m, 6000);
     this.system.onLabelClick = (b) => this.focus(b);
 
@@ -124,11 +127,17 @@ class App {
     const { defs, promoted } = buildMinorBodyDefs(this.data);
     const comets = buildCometDefs(this.data);                 // notable comets + interstellar objects
     for (const p of comets.promoted) promoted.add(p);
-    const craft = buildSpacecraftDefs(this.data, this.system);      // Horizons-tracked spacecraft as full bodies
-    for (const id of craft.trackIds) promoted.add('track:' + id);
-    const added = this.system.addBodies([...defs, ...comets.defs, ...craft.defs]);
+    // Earth satellites (CelesTrak snapshot, SGP4). The ISS then comes from its elements instead of the Horizons track
+    // (Horizons' own ISS trajectory is TLE-based; the two agree to ~0.3 km — tests/satellites.test.mjs).
+    const sats = satRecords(this.data.satellites);
+    this.satLayer = sats.length ? new SatelliteLayer(this.scene, this.system, sats) : null;
+    const satDefs = this.satLayer ? this.satLayer.bodyDefs() : [];
+    const skip = new Set(satDefs.some((d) => d.key === 'iss') ? ['iss'] : []);
+    const craft = buildSpacecraftDefs(this.data, this.system, skip);      // Horizons-tracked spacecraft as full bodies
+    for (const id of [...craft.trackIds, ...skip]) promoted.add('track:' + id);
+    const added = this.system.addBodies([...defs, ...comets.defs, ...craft.defs, ...satDefs]);
     // Palette-textured models: mark them so the procedural-texture pump never replaces (and disposes) the shared palette.
-    for (const b of added) if (b.minorType === 'spacecraft') { this.system._setMap(b, paletteTexture()); b.textureState = 'palette'; b.flatTex = null; }
+    for (const b of added) if (b.minorType === 'spacecraft' || b.minorType === 'satellite') { this.system._setMap(b, paletteTexture()); b.textureState = 'palette'; b.flatTex = null; }
     this._stepSimulation(0);
     this.ui.addBodies(added);
     this.smallBodies = new SmallBodyLayer(this.scene, this.data, promoted);
@@ -144,10 +153,18 @@ class App {
       this.system.selected = this.system.byKey[fk];
       this.cam.flyTo(this.system.byKey[fk], { instant: q.get('instant') != null });
     }
+    // ?sat=<NORAD catalog number> selects and flies to a satellite (e.g. sat=20580 for Hubble).
+    if (q.get('sat') && this.satLayer) {
+      const i = this.satLayer.findNorad(q.get('sat'));
+      if (i >= 0) this.selectSatellite(i, { instant: q.get('instant') != null });
+      else this.ui.toast(`No satellite with NORAD number ${q.get('sat')} in data/satellites.json`, 6000);
+    }
     this.applyQuality(this.quality, { effects: false });           // pixel ratio + small-body draw limit for the new layer
     this.smallBodies.showLabels = true;
     this.ui.onDataLoaded(this.data, this.smallBodies);
-    if (!this.data.available) this.ui.toast('No /data/ folder found — showing planets and moons only. Run "node fetch-data.mjs" (see README).', 9000);
+    // Local development only: let the MCP server (mcp/server.mjs, via tools/serve.mjs) drive this tab.
+    if (/^(localhost|127\.0\.0\.1|\[::1\])$/.test(location.hostname)) import('./bridge.js').then((m) => m.startBridge(this)).catch((e) => console.warn('[bridge]', e.message));
+    if (!this.data.available) this.ui.toast('No /data/ folder found — showing planets and moons only. Run "node fetch-data.mjs" (see INSTALL.md).', 9000);
     else if (this.data.stale) this.ui.toast(`Small-body data is ${Math.floor(this.data.ageDays)} days old — re-run "node fetch-data.mjs" to update.`, 9000);
     if (this.data.errors.length) console.warn('[data] some files failed to load:', this.data.errors);
     return this.data;
@@ -190,6 +207,8 @@ class App {
     this.cometFx?.update(jdT, this.state, this.scale, this.cam.pos, this.camera, this.post.exposure, this.time);
     this.showers?.update(jdT, this.state, this.scale, this.cam.pos, this.system.byKey.earth, this.post.exposure, dt, this.system);
     this.craftTrails?.update(jdT, this.scale, this.cam.pos, 1 / this.post.exposure);
+    if (this.satLayer) this.satLayer.focusIss = this.cam.target?.key === 'iss';
+    this.satLayer?.update(jdT, this.clock.jdUTC, this.scale, this.cam.pos, this.camera, 1 / this.post.exposure, w, h);
     this.system.pumpProceduralTextures();
     this.photoTex.update(now);
     this._adaptExposure(dt, w, h);
@@ -289,6 +308,7 @@ class App {
     if (surfBody?.atmoMesh) surfBody.atmoMesh.visible = false;          // syncToCamera re-enables it each frame
     if (this.showers) this.showers.hideStreams = !!surfBody;
     if (this.craftTrails) this.craftTrails.hidden = !!surfBody;          // like orbit lines, trails clutter the sky from the ground
+    if (this.satLayer) { this.satLayer.hidden = !!surfBody; this.satLayer.overlay = sensor; }   // paths + labels need the sensor overlay
     sys.markers.visible = (this.ui.guiState?.markers ?? true) && sensor && (this._skyDay || 0) < 0.5;
     sys.show.minorLabels = sensor;
     this.sensor.enabled = sensor;
@@ -331,6 +351,27 @@ class App {
 
   // --- actions used by UI -------------------------------------------------------
   focus(body) { this.system.selected = body; this.cam.flyTo(body); }
+
+  /**
+   * Click: the satellite dot under the cursor, if it is nearer than the body that was hit (a dot drawn over
+   * Earth's disc is in front of it). Returns true when a satellite was selected.
+   */
+  pickSatellite(x, y, body) {
+    const L = this.satLayer;
+    if (!L) return false;
+    const hit = L.pick(x, y, this.scale, this.camera, window.innerWidth, window.innerHeight, body ? 6 : 10);
+    if (hit.i < 0 || (body && body.camDist < hit.dist)) return false;       // behind the body's centre: the body wins
+    this.selectSatellite(hit.i);
+    return true;
+  }
+
+  selectSatellite(i, opts) {
+    const b = this.satLayer.select(i);
+    this.ui._infoKey = null;                                   // the stand-in body keeps its key: refresh the static rows
+    this._stepSimulation(0);                                   // place it before flying to it
+    this.system.selected = b;
+    this.cam.flyTo(b, opts);
+  }
 
   setCameraMode(n) {
     if (n === 1) this.cam.setMode('free');

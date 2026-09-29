@@ -7,6 +7,7 @@ import { RATE_PRESETS, jdToUTCString, utcStringToJD, utcToTDB, MIN_JD, MAX_JD } 
 import { AU_KM, C_KM_S } from './ephemeris.js';
 import { runVerify } from './verify.js';
 import { buildReport } from './report.js';
+import { SAT_GROUPS, MAX_DAYS } from './satcore.js';
 import { cometInfo } from './comets.js';
 
 const $ = (id) => document.getElementById(id);
@@ -219,7 +220,7 @@ export class UI {
     if (!data.available) {
       el.textContent = 'missing — run fetch-data';
       el.className = 'missing';
-      el.title = 'No ./data/ folder. Run: node fetch-data.mjs (see README.md). Planets and moons still work.';
+      el.title = 'No ./data/ folder. Run: node fetch-data.mjs (see INSTALL.md). Planets and moons still work.';
       $('hud-sb').textContent = 'none loaded';
       return;
     }
@@ -250,6 +251,26 @@ export class UI {
     const gs = Object.fromEntries(Object.keys(groups).map((k) => [k, true]));
     // Spacecraft: one switch for the craft bodies, their trails and labels (and any leftover points).
     for (const [k, name] of Object.entries(groups)) f.add(gs, k).name(name).onChange((v) => { sb.setVisibility(k, v); if (k === 'spacecraft') sys.setVisibility({ spacecraft: v }); });
+    f.close();
+    this._buildSatGUI();
+  }
+
+  /** Earth satellites: layer switches, path brightness, one switch per CelesTrak group. */
+  _buildSatGUI() {
+    const L = this.app.satLayer;
+    if (!L) return;
+    const f = this.gui.addFolder('Satellites');
+    const st = L.settings;
+    f.add(st, 'paths').name('Orbit paths');
+    f.add(st, 'points').name('Satellite dots');
+    f.add(st, 'labels').name('Station labels');
+    f.add(st, 'pathGain', 0.05, 1, 0.05).name('Path opacity');
+    f.add(st, 'size', 1, 8, 0.5).name('Dot size');
+    const vis = {};
+    SAT_GROUPS.forEach((g, i) => {
+      vis[g.key] = true;
+      f.add(vis, g.key).name(`${g.name} (${L.groupCount(i)})`).onChange((v) => L.setVisibility(g.key, v));
+    });
     f.close();
   }
 
@@ -430,6 +451,7 @@ export class UI {
       $('hud-light').textContent = t.kind === 'sun' ? '—' : fmtDuration(rs / C_KM_S);
     }
     this._updateInfo(t);
+    this._hudSatellites();
     $('oort-note').style.display = this.app.oort?.visible && this.app.oortFade > 0.05 ? 'block' : 'none';
     // Meteor showers Earth is currently crossing (activity from the Earth–stream distance).
     const sh = (this.app.showers?.state || []).filter((x) => x.act > 0.03);
@@ -454,6 +476,24 @@ export class UI {
     this._syncTimeButtons();
   }
 
+  /** HUD row: satellite snapshot date and how many are drawn for the current date. */
+  _hudSatellites() {
+    const L = this.app.satLayer, d = this.app.data, row = $('hud-sat-row');
+    if (!L) { row.style.display = d?.available ? '' : 'none'; $('hud-sat').textContent = 'none — node fetch-data.mjs --satellites'; row.classList.add('warn'); return; }
+    row.style.display = '';
+    const age = d.satAgeDays, snap = d.satellites.generated.slice(0, 10);
+    const c = L.counts;
+    let text = `${L.N.toLocaleString()} · snapshot ${snap} (${age < 1 ? (age * 24).toFixed(0) + ' h' : age.toFixed(1) + ' d'} old)`;
+    let warn = age > 7;
+    if (c && L.active) {
+      if (c.shown === 0) { text = `none on this date — elements from ${snap}, shown within ±${MAX_DAYS} d`; warn = true; }
+      else if (c.approx) text += ` · ${c.approx} approximate`;
+    }
+    $('hud-sat').textContent = text;
+    row.classList.toggle('warn', warn);
+    row.title = 'Earth satellites from a CelesTrak snapshot (SGP4). Predictions degrade by km per day in low orbit: refresh with "node fetch-data.mjs --satellites" every few days.';
+  }
+
   _updateInfo(b) {
     const el = $('info');
     if (!b) { el.classList.remove('open'); return; }
@@ -464,13 +504,13 @@ export class UI {
       $('info-name').style.setProperty('--c', b.color);
       $('info-type').textContent = b.type;
       const km = (v) => (v < 10 ? v.toFixed(2) : v.toLocaleString('en-US', { maximumFractionDigits: 0 }));
-      $('info-radius').textContent = b.craft ? `${b.craft.span} m across (largest dimension)` : b.axes
+      $('info-radius').textContent = b.minorType === 'satellite' ? 'not in the orbital catalogue' : b.craft ? `${b.craft.span} m across (largest dimension)` : b.axes
         ? `${km(2 * b.axes[0])} × ${km(2 * b.axes[1])} × ${km(2 * b.axes[2])} km (mean R ${km(b.radius)} km)`
         : `${b.radius.toLocaleString('en-US')} km${b.flat ? ` (flattening ${b.flat})` : ''}`;
       $('info-mass').textContent = b.mass ? `${b.mass.toExponential(3).replace('e+', ' × 10^')} kg` : '—';
       const parent = b.parent && this.app.system.byKey[b.parent];
       $('info-orbit').textContent = b.kind === 'sun' ? '—' : fmtPeriod(b.orbitDays) + (b.kind === 'moon' ? ` (around ${parent.name})` : '');
-      $('info-rot').textContent = b.minorType === 'spacecraft' ? 'attitude-controlled' : b.kind === 'moon' ? (b.rotHours ? fmtPeriod(b.rotHours / 24) : `${fmtPeriod(b.orbitDays)} — assumed synchronous`)
+      $('info-rot').textContent = b.minorType === 'spacecraft' || b.minorType === 'satellite' ? 'attitude-controlled' : b.kind === 'moon' ? (b.rotHours ? fmtPeriod(b.rotHours / 24) : `${fmtPeriod(b.orbitDays)} — assumed synchronous`)
         : b.lockedTo ? `${fmtPeriod(b.rotHours / 24)} — synchronous with ${this.app.system.byKey[b.lockedTo]?.name}`
           : `${fmtPeriod(b.rotHours / 24)}${b.rotHours < 0 ? ' — retrograde' : ''}`;
       $('info-tilt').textContent = b.kind === 'moon' ? '≈0° (synchronous)' : b.tilt != null ? `${b.tilt}°` : (b.poleNote ? `pole: ${b.poleNote}` : '—');
@@ -493,7 +533,7 @@ export class UI {
       const text = b.infoFn(this.app.system, utcToTDB(this.app.clock.jdUTC));
       if ($('info-notes').textContent !== text) { $('info-notes').textContent = text; $('info-notes-row').style.display = text ? '' : 'none'; }
     }
-    $('info-follow').style.display = b.minorType === 'spacecraft' ? '' : 'none';
+    $('info-follow').style.display = b.minorType === 'spacecraft' || b.minorType === 'satellite' ? '' : 'none';
     const r = Math.hypot(...b.helio);
     $('info-sundist').textContent = b.kind === 'sun' ? '—' : `${(r / AU_KM).toFixed(5)} AU · ${fmtKm(r)}`;
   }

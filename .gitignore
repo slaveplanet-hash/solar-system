@@ -14,3 +14,6 @@ npm-debug.log*
 # Local scratch
 node_modules/
 .cache/
+
+# Local error log (tools/serve.mjs)
+logs/

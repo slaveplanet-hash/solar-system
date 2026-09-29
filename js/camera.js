@@ -84,6 +84,8 @@ export class CameraController {
       if (this.mode === 'surface') return;
       const rect = dom.getBoundingClientRect();
       const b = this.system.pick(e.clientX - rect.left, e.clientY - rect.top);
+      // A satellite dot in front of the picked body (e.g. over Earth's disc) wins.
+      if (this.onPickSatellite?.(e.clientX - rect.left, e.clientY - rect.top, b)) return;
       if (b) this.onPick?.(b);
     });
     dom.addEventListener('wheel', (e) => {
