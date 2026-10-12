@@ -111,6 +111,7 @@ class App {
     } else if (q.get('cam') === 'chase') this.setCameraMode(3);
     else if (q.get('cam') === 'cockpit') this.setCameraMode(4);
     this.ui.syncMode(this.cam.mode);
+    if (q.get('ship')) this.selectShip(q.get('ship'));
     this._bindDrop();
 
     window.addEventListener('resize', () => this._resize());
@@ -443,6 +444,22 @@ class App {
     } catch (err) {
       console.error(err);
       this.ui.toast(`Could not load the model: ${err.message}`, 8000);
+      return false;
+    }
+  }
+
+  /** Pick a built-in ship (Ship → Choose ship, or ?ship=<id>). */
+  async selectShip(id) {
+    try {
+      const def = await this.ship.selectModel(id);
+      if (!def) return false;                                   // superseded by a later pick
+      this.ui.syncShip?.();
+      if (id !== 'placeholder') this.ui.toast(`Ship: ${def.name} (${def.lengthM} m long)`, 4000);
+      return true;
+    } catch (err) {
+      console.error(err);
+      this.ui.toast(`Could not build the ship: ${err.message || err}`, 8000);
+      this.ui.syncShip?.();
       return false;
     }
   }

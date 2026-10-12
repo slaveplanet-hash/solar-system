@@ -17,3 +17,12 @@ node_modules/
 
 # Local error log (tools/serve.mjs)
 logs/
+
+# Claude Code session exports (contain local paths)
+out/
+
+# Blender auto-backups
+*.blend1
+
+# Staging folder for files to delete
+remove/

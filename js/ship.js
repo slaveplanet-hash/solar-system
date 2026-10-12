@@ -14,6 +14,13 @@ import { AU_KM } from './ephemeris.js';
 import { RefFrame, nearestSurface } from './refframe.js';
 
 const R_SUN_KM = 695700;
+
+/** Built-in ships for the Ship drop-down. `build` (lazy) returns { root, engines, lights?, cockpit, animate? } in model units. */
+export const SHIP_MODELS = [
+  { id: 'placeholder', name: 'Placeholder shuttle', lengthM: 60 },
+  { id: 'sample', name: 'Sample', lengthM: 289, forward: '+Z',
+    build: async () => (await import('./ships/Sample.js')).buildSampleShip() },
+];
 const THREE_VER = '0.160.0';
 const LOGDEPTH_V = '#include <common>\n#include <logdepthbuf_pars_vertex>';
 
@@ -184,16 +191,39 @@ export class ShipController {
   useDefaultModel() {
     const p = buildPlaceholderShip();
     this._source = null;
+    this._anchors = null;
+    this.animate = null;
+    this.modelId = 'placeholder';
     this.modelName = 'placeholder';
     this._install(p.root, p.engines, p.lights, p.cockpit);
+  }
+
+  /** Switch to a built-in ship from SHIP_MODELS (sets its real length). */
+  async selectModel(id) {
+    const def = SHIP_MODELS.find((m) => m.id === id);
+    if (!def) throw new Error(`unknown ship '${id}'`);
+    const token = (this._selectToken = {});
+    if (!def.build) this.useDefaultModel();
+    else {
+      const b = await def.build();
+      if (token !== this._selectToken) return null;         // a later pick (or a dropped model) won the race
+      this.setModel(b.root, { forward: def.forward, name: def.name, anchors: b });
+    }
+    this.modelId = def.id;
+    this.lengthM = def.lengthM;
+    return def;
   }
 
   /**
    * Attach ANY Object3D as the ship. It is re-oriented so `forward` ('+Z' | '-Z' | '+X' | '-X')
    * points along the flight direction, centred, and normalised to unit length.
    */
-  setModel(object, { forward = this.forwardAxis, name = 'custom model', keep = null } = {}) {
+  setModel(object, { forward = this.forwardAxis, name = 'custom model', keep = null, anchors = null } = {}) {
+    this._selectToken = null;
     this._source = object;
+    this._anchors = anchors;                            // built-in ships: engines/lights/cockpit in model units + animate
+    this.animate = anchors?.animate || null;
+    this.modelId = 'custom';
     this.modelName = name;
     this.forwardAxis = forward;
     const rotY = { '+Z': Math.PI, '-Z': 0, '+X': Math.PI / 2, '-X': -Math.PI / 2 }[forward] ?? Math.PI;
@@ -213,6 +243,14 @@ export class ShipController {
       for (const m of Array.isArray(o.material) ? o.material : [o.material]) if (m && 'metalness' in m) m.metalness = Math.min(m.metalness, 0.6);
     });
     const w = size.x * s, h = size.y * s;
+    if (anchors) {
+      object.updateMatrix(); turn.updateMatrix();
+      const toNorm = (p) => p.clone().applyMatrix4(object.matrix).applyMatrix4(turn.matrix).multiplyScalar(s);
+      const engines = anchors.engines.map((e) => ({ pos: toNorm(e.pos), r: e.r * s }));
+      const lights = (anchors.lights || []).map((l) => ({ ...l, pos: toNorm(l.pos) }));
+      this._install(norm, engines, lights, toNorm(anchors.cockpit), keep);
+      return { length: size.z, width: size.x, height: size.y };
+    }
     const engines = [{ pos: new THREE.Vector3(0, 0, 0.5), r: Math.max(0.02, 0.12 * Math.min(w, h)) }];
     const lights = [
       { pos: new THREE.Vector3(-w / 2, 0, 0.15), color: new THREE.Color(1, 0.08, 0.05) },
@@ -228,7 +266,9 @@ export class ShipController {
     if (this._source) {
       const src = this._source;
       src.parent?.remove(src);
-      this.setModel(src, { forward: axis, name: this.modelName, keep: src });
+      const id = this.modelId;
+      this.setModel(src, { forward: axis, name: this.modelName, keep: src, anchors: this._anchors });
+      this.modelId = id;
     }
   }
 
@@ -469,6 +509,7 @@ export class ShipController {
     this.exhaust.material.uniforms.uGain.value = 0.3 / exposure;   // seen end-on from the chase cam: many sprites overlap
     this.exhaust.material.uniforms.uScale.value = height / (2 * Math.tan((camera.fov * Math.PI) / 360));
     this.exhaust.material.uniforms.uNear.value = L * 0.8;
+    this.animate?.(time, exposure);                     // built-in ships' own lights (nacelles, windows, ...)
     for (const n of this.navLights) {
       const on = !n.strobe || (time % 1.2) < 0.08;
       n.mesh.visible = on;

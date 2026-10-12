@@ -31,7 +31,7 @@ const tests = suites.map((s) => {
 
 const env = [
   `Generated ${new Date().toISOString().replace('T', ' ').slice(0, 19)} UTC with Node ${process.version}`,
-  `Data: ${dataDir} (${data.available ? `downloaded ${data.manifest.date}, ${data.manifest.mode}` : 'missing'})`,
+  `Data: ${path.relative(root, dataDir).split(path.sep).join('/') || '.'} (${data.available ? `downloaded ${data.manifest.date}, ${data.manifest.mode}` : 'missing'})`,
   'Browser-only rows (GPU solver readback, named-body models) are SKIP here — run ✓ Verify in the app and use "Copy report".',
 ];
 const md = buildReport(results, { tests, env });

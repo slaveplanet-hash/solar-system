@@ -1,7 +1,7 @@
 # Sol Simulator — self-check report
 
 - Generated 2026-09-26 00:50:41 UTC with Node v24.18.0
-- Data: data/ (downloaded 2026-09-25, full)
+- Data: data (downloaded 2026-09-25, full)
 - Browser-only rows (GPU solver readback, named-body models) are SKIP here — run ✓ Verify in the app and use "Copy report".
 - **Verify:** 34 pass · 0 fail · 2 skipped · 0 pending
 - **Test suites:** 5 (5 passed) — 84 PASS lines, 0 FAIL

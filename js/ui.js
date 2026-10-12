@@ -9,6 +9,7 @@ import { runVerify } from './verify.js';
 import { buildReport } from './report.js';
 import { SAT_GROUPS, MAX_DAYS } from './satcore.js';
 import { cometInfo } from './comets.js';
+import { SHIP_MODELS } from './ship.js';
 
 const $ = (id) => document.getElementById(id);
 
@@ -279,7 +280,12 @@ export class UI {
     const app = this.app, ship = app.ship, cam = app.cam;
     const fS = gui.addFolder('Ship');
     const st = this.shipState = { length: ship.lengthM, forward: ship.forwardAxis, arm: ship.chase.arm, height: ship.chase.height,
-      cx: ship.cockpit.x, cy: ship.cockpit.y, cz: ship.cockpit.z, url: '', model: ship.modelName };
+      cx: ship.cockpit.x, cy: ship.cockpit.y, cz: ship.cockpit.z, url: '', model: ship.modelName, ship: ship.modelId };
+    const ships = Object.fromEntries(SHIP_MODELS.map((m) => [m.name, m.id]));
+    fS.add(st, 'ship', { ...ships, 'Custom (loaded model)': 'custom' }).name('Choose ship').onChange((id) => {
+      if (id === 'custom') { st.ship = ship.modelId; this.syncShip(); return; }   // pick a file/URL below for that
+      app.selectShip(id);
+    });
     fS.add(st, 'model').name('Model').disable();
     fS.add(st, 'length', 1, 1e6).name('Length (m)').onChange((v) => { if (v > 0) ship.lengthM = v; });
     fS.add(st, 'forward', ['+Z', '-Z', '+X', '-X']).name('Model forward axis').onChange((v) => { ship.setForwardAxis(v); this.syncShip(); });
@@ -290,7 +296,7 @@ export class UI {
     fS.add(st, 'cz', -0.6, 0.6, 0.005).name('Cockpit z (× length, − = nose)').onChange((v) => (ship.cockpit.z = v));
     fS.add(st, 'url').name('GLTF/GLB URL');
     fS.add({ load: () => st.url.trim() && app.loadShipURL(st.url.trim()) }, 'load').name('Load URL (or drop a .glb on the page)');
-    fS.add({ reset: () => { ship.useDefaultModel(); this.syncShip(); } }, 'reset').name('Use placeholder ship');
+    fS.add({ reset: () => app.selectShip('placeholder') }, 'reset').name('Use placeholder ship');
     fS.add({ bring: () => { ship.spawnAt(cam.pos, app.camera.quaternion); if (!cam.piloting) app.setCameraMode(3); } }, 'bring').name('Bring ship to camera');
     fS.close();
     this.shipFolder = fS;
@@ -306,7 +312,7 @@ export class UI {
   /** Reflect ship settings after a model change (cockpit anchor, forward axis, name). */
   syncShip() {
     const st = this.shipState, ship = this.app.ship;
-    Object.assign(st, { model: ship.modelName, forward: ship.forwardAxis, cx: ship.cockpit.x, cy: ship.cockpit.y, cz: ship.cockpit.z, length: ship.lengthM });
+    Object.assign(st, { ship: ship.modelId, model: ship.modelName, forward: ship.forwardAxis, cx: ship.cockpit.x, cy: ship.cockpit.y, cz: ship.cockpit.z, length: ship.lengthM });
     this.shipFolder.controllers.forEach((c) => c.updateDisplay());
   }
 
